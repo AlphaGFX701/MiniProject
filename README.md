@@ -1,56 +1,50 @@
-# Welcome to your Expo app 👋
+# ECHO HUNT: Campus Legends
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+ECHO HUNT is an Android campus creature adventure built with Expo SDK 57, React Native, and TypeScript. The player explores KMUTNB Bangkok using foreground GPS or a clearly marked Demo Walk joystick, battles three elemental creatures, captures them with a swipe-controlled Echo Orb, and keeps progress in a local field guide.
 
-## Get started
+## Included game loop
 
-1. Install dependencies
+- GPS and Demo Walk movement on a Google campus map
+- Three 40-meter encounter zones at the Faculty of Technical Education, Building 44, and Celebration Plaza
+- Six companions across Fire, Water, and Grass
+- Tap attacks, elemental multipliers, fixed buffs, energy, and Ultimate attacks
+- Swipe capture with a moving target, misses, escapes, and a guaranteed third hit
+- Persistent collection, active companion selection, sound settings, reset confirmation, and completion screen
+- English-only interface with portrait safe-area layouts
 
-   ```bash
-   npm install
-   ```
+## Run for development
 
-2. Start the app
+Install the dependencies once:
 
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
-
-```bash
-npm run reset-project
+```powershell
+npm install
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+Start Metro:
 
-### Other setup steps
+```powershell
+npx expo start
+```
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+Then press `a` to open the app in an Android emulator, or scan the Expo Go QR code on an Android phone. Location permission is foreground-only. Demo Walk starts at the KMUTNB campus center when the current GPS position is more than one kilometer away.
 
-## Learn more
+The restricted Google Maps key in `app.json` is injected into the native Android application during a native build. Expo Go uses its own Android package and native configuration, so use it to test the game flow and use the approved preview build later to verify restricted-key map tiles.
 
-To learn more about developing your project with Expo, look at the following resources:
+## Quality checks
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+```powershell
+npm run typecheck
+npm run lint
+npm test
+npx expo-doctor
+```
 
-## Join the community
+The unit tests cover all nine elemental matchups, buffs, attack throttling, capture guarantees, encounter boundaries, and damaged save data.
 
-Join our community of developers creating universal apps.
+## Android build gate
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+Do not run an EAS build or create an APK until the project owner explicitly approves it. The existing Android package remains `com.acer.miniproject`, with the existing Expo slug, EAS project, and Google Maps credentials.
+
+## Assets and classroom use
+
+Only selected files from the provided packs are included under `assets/game`; source ZIP archives are not bundled. Selected Pokémon-derived attack and faint sounds are included only for a non-commercial classroom demonstration and must be replaced before public or commercial release. See [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md) for credits and licensing notes.

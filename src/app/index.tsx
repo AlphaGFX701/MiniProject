@@ -1,98 +1,49 @@
-import * as Device from 'expo-device';
-import { Platform, StyleSheet } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 
-import { AnimatedIcon } from '@/components/animated-icon';
-import { HintRow } from '@/components/hint-row';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { WebBadge } from '@/components/web-badge';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { useGame } from "@/game/game-context";
+import { fonts, palette } from "@/game/theme";
+import { BattleScreen } from "@/game/screens/battle-screen";
+import { CaptureScreen } from "@/game/screens/capture-screen";
+import { CollectionScreen } from "@/game/screens/collection-screen";
+import { CompleteScreen } from "@/game/screens/complete-screen";
+import { MapScreen } from "@/game/screens/map-screen";
+import { OnboardingScreen } from "@/game/screens/onboarding-screen";
+import { SettingsScreen } from "@/game/screens/settings-screen";
+import { TrainerScreen } from "@/game/screens/trainer-screen";
 
-function getDevMenuHint() {
-  if (Platform.OS === 'web') {
-    return <ThemedText type="small">use browser devtools</ThemedText>;
-  }
-  if (Device.isDevice) {
+export default function GameRoot() {
+  const { hydrated, screen } = useGame();
+
+  if (!hydrated) {
     return (
-      <ThemedText type="small">
-        shake device or press <ThemedText type="code">m</ThemedText> in terminal
-      </ThemedText>
+      <View style={styles.loading}>
+        <ActivityIndicator color={palette.aqua} size="large" />
+        <Text style={styles.loadingText}>LOADING FIELD GUIDE</Text>
+      </View>
     );
   }
-  const shortcut = Platform.OS === 'android' ? 'cmd+m (or ctrl+m)' : 'cmd+d';
-  return (
-    <ThemedText type="small">
-      press <ThemedText type="code">{shortcut}</ThemedText>
-    </ThemedText>
-  );
-}
 
-export default function HomeScreen() {
-  return (
-    <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        <ThemedView style={styles.heroSection}>
-          <AnimatedIcon />
-          <ThemedText type="title" style={styles.title}>
-            Welcome to&nbsp;Expo
-          </ThemedText>
-        </ThemedView>
-
-        <ThemedText type="code" style={styles.code}>
-          get started
-        </ThemedText>
-
-        <ThemedView type="backgroundElement" style={styles.stepContainer}>
-          <HintRow
-            title="Try editing"
-            hint={<ThemedText type="code">src/app/index.tsx</ThemedText>}
-          />
-          <HintRow title="Dev tools" hint={getDevMenuHint()} />
-          <HintRow
-            title="Fresh start"
-            hint={<ThemedText type="code">npm run reset-project</ThemedText>}
-          />
-        </ThemedView>
-
-        {Platform.OS === 'web' && <WebBadge />}
-      </SafeAreaView>
-    </ThemedView>
-  );
+  if (screen === "onboarding") return <OnboardingScreen />;
+  if (screen === "trainer") return <TrainerScreen />;
+  if (screen === "battle") return <BattleScreen />;
+  if (screen === "capture") return <CaptureScreen />;
+  if (screen === "collection") return <CollectionScreen />;
+  if (screen === "settings") return <SettingsScreen />;
+  if (screen === "complete") return <CompleteScreen />;
+  return <MapScreen />;
 }
 
 const styles = StyleSheet.create({
-  container: {
+  loading: {
+    alignItems: "center",
+    backgroundColor: palette.navy,
     flex: 1,
-    justifyContent: 'center',
-    flexDirection: 'row',
+    gap: 18,
+    justifyContent: "center",
   },
-  safeArea: {
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    alignItems: 'center',
-    gap: Spacing.three,
-    paddingBottom: BottomTabInset + Spacing.three,
-    maxWidth: MaxContentWidth,
-  },
-  heroSection: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    gap: Spacing.four,
-  },
-  title: {
-    textAlign: 'center',
-  },
-  code: {
-    textTransform: 'uppercase',
-  },
-  stepContainer: {
-    gap: Spacing.three,
-    alignSelf: 'stretch',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.four,
-    borderRadius: Spacing.four,
+  loadingText: {
+    color: palette.cream,
+    fontFamily: fonts.pixelBold,
+    fontSize: 10,
   },
 });

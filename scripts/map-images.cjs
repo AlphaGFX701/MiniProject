@@ -1,0 +1,1 @@
+const fs=require('fs');let frames={};for(const dir of ['down','up','left','right']) frames[dir]=[0,1,2,3].map(n=>'data:image/png;base64,'+fs.readFileSync(`assets/game/player/player-${dir}-${n}.png`).toString('base64'));fs.writeFileSync('src/game/player-map-images.json',JSON.stringify(frames));

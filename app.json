@@ -1,22 +1,21 @@
 {
   "expo": {
-    "name": "MiniProject",
+    "name": "ECHO HUNT",
     "slug": "miniproject",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/game/branding/app-icon.png",
     "scheme": "miniproject",
-    "userInterfaceStyle": "automatic",
+    "userInterfaceStyle": "light",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/game/branding/app-icon.png"
     },
     "android": {
       "package": "com.acer.miniproject",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+        "backgroundColor": "#10263E",
+        "foregroundImage": "./assets/game/branding/adaptive-foreground.png",
+        "monochromeImage": "./assets/game/branding/adaptive-monochrome.png"
       },
       "predictiveBackGestureEnabled": false
     },
@@ -29,11 +28,19 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#208AEF",
-          "image": "./assets/images/splash-icon.png",
-          "imageWidth": 76
+          "backgroundColor": "#10263E",
+          "image": "./assets/game/branding/splash-orb.png",
+          "imageWidth": 160
         }
-      ]
+      ],
+      [
+        "react-native-maps",
+        {
+          "androidGoogleMapsApiKey": "AIzaSyD7cWk1sEL7f6Sh-_kIIPOgSFKrZsGFt-s"
+        }
+      ],
+      "expo-audio",
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true,
