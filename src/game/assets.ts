@@ -288,6 +288,7 @@ export const battleBackgrounds: Record<Element, ImageSourcePropType> = {
 
 export const titleBackground = require("../../assets/game/backgrounds/mountain-dusk.png");
 export const echoOrb = require("../../assets/game/branding/echo-orb.png");
+export const warpIcon = require("../../assets/game/icons/warp-crystal.png");
 export const ultimateFrames = [
   require("../../assets/game/effects/ultimate/frame0000.png"),
   require("../../assets/game/effects/ultimate/frame0001.png"),

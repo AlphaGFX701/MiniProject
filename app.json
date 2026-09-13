@@ -29,8 +29,9 @@
         "expo-splash-screen",
         {
           "backgroundColor": "#10263E",
-          "image": "./assets/game/branding/splash-orb.png",
-          "imageWidth": 160
+          "image": "./assets/game/backgrounds/mountain-dusk.png",
+          "imageWidth": 400,
+          "resizeMode": "cover"
         }
       ],
       [
@@ -40,7 +41,9 @@
         }
       ],
       "expo-audio",
-      "expo-asset"
+      "expo-asset",
+      "expo-image",
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true,

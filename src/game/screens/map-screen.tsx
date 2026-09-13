@@ -18,11 +18,6 @@ import {
   Text,
   View,
 } from "react-native";
-import Constants from "expo-constants";
-import {
-  CampusWebMap,
-  type CampusMapHandle,
-} from "../components/campus-web-map";
 import * as Location from "expo-location";
 import MapView, {
   Circle,
@@ -32,13 +27,15 @@ import MapView, {
 } from "react-native-maps";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { creatureArt, playerFrames, echoOrb } from "../assets";
+import { creatureArt, playerFrames, echoOrb, warpIcon } from "../assets";
 import {
   CAMPUS_CENTER,
   CREATURES,
   DEMO_SPEED_METERS_PER_SECOND,
   ENCOUNTER_LIST,
   ENCOUNTERS,
+  FACULTY_COORDINATES,
+  TRAINER_RADIUS_METERS,
   coreComplete,
   coreCount,
   WEAK_GPS_ACCURACY_METERS,
@@ -50,7 +47,13 @@ import { Joystick } from "../components/joystick";
 import { useGame } from "../game-context";
 import { distanceMeters, moveCoordinate, typeMultiplier } from "../logic";
 import { elementColors, fonts, palette } from "../theme";
-import type { Coordinate, CreatureId, EncounterId, LandmarkId } from "../types";
+import type {
+  Coordinate,
+  CreatureId,
+  Element,
+  EncounterId,
+  LandmarkId,
+} from "../types";
 
 type Direction = keyof typeof playerFrames;
 type PermissionState = "checking" | "granted" | "denied" | "services-off";
@@ -82,6 +85,15 @@ const MAP_STYLE = [
   },
 ];
 
+const ELEMENT_ADVANTAGES: { element: Element; defeats: Element[] }[] = [
+  { element: "fire", defeats: ["grass", "ice"] },
+  { element: "water", defeats: ["fire"] },
+  { element: "grass", defeats: ["water"] },
+  { element: "ice", defeats: ["grass"] },
+  { element: "psychic", defeats: ["ice"] },
+  { element: "dark", defeats: ["psychic"] },
+];
+
 export function MapScreen() {
   const {
     save,
@@ -94,20 +106,18 @@ export function MapScreen() {
     openCollection,
     openSettings,
     openTrainer,
+    returnToTitle,
   } = useGame();
-  const webMapRef = useRef<CampusMapHandle>(null);
-  const usePreviewMap = Constants.executionEnvironment === "storeClient";
+  const mapRef = useRef<MapView>(null);
   const camera = useCallback(
     (
       c: { center: Coordinate; zoom?: number },
       options?: { duration: number },
     ) => {
-      if (usePreviewMap) webMapRef.current?.animateCamera(c, options);
-      else mapRef.current?.animateCamera(c, options);
+      mapRef.current?.animateCamera(c, options);
     },
-    [usePreviewMap],
+    [],
   );
-  const mapRef = useRef<MapView>(null);
   const demoCoordinateRef = useRef(demoCoordinate);
   const movementRef = useRef({ x: 0, y: 0 });
   const previousGpsRef = useRef<Coordinate | null>(null);
@@ -123,6 +133,8 @@ export function MapScreen() {
       )?.id ?? "faculty",
   );
   const [showCompanions, setShowCompanions] = useState(false);
+  const [showElementGuide, setShowElementGuide] = useState(false);
+  const [showWarpMenu, setShowWarpMenu] = useState(false);
   const [chosenCompanion, setChosenCompanion] = useState<CreatureId>(
     save.activeCompanionId,
   );
@@ -278,6 +290,10 @@ export function MapScreen() {
     playerCoordinate,
     selectedEncounter.coordinate,
   );
+  const trainerCoordinate = FACULTY_COORDINATES[landmark.id as LandmarkId];
+  const trainerDistance = distanceMeters(playerCoordinate, trainerCoordinate);
+  const panelDistance =
+    panelKind === "trainer" ? trainerDistance : selectedDistance;
   const selectedComplete = save.completedEncounterIds.includes(
     selectedEncounter.id,
   );
@@ -328,6 +344,16 @@ export function MapScreen() {
   const recenter = () =>
     camera({ center: playerCoordinate, zoom: 18 }, { duration: 450 });
 
+  const warpTo = (coordinate: Coordinate) => {
+    movementRef.current = { x: 0, y: 0 };
+    setMoving(false);
+    demoCoordinateRef.current = coordinate;
+    setDemoCoordinate(coordinate);
+    setDetailsOpen(false);
+    setShowWarpMenu(false);
+    camera({ center: coordinate, zoom: 19 }, { duration: 450 });
+  };
+
   if (Platform.OS === "web") {
     return (
       <SafeAreaView style={styles.webFallback}>
@@ -344,23 +370,7 @@ export function MapScreen() {
 
   return (
     <View style={styles.container}>
-      {usePreviewMap ? (
-        <CampusWebMap
-          ref={webMapRef}
-          coordinate={playerCoordinate}
-          direction={direction}
-          frame={moving ? playerFrame : 0}
-          onSelect={selectMarker}
-          onDismiss={() => setDetailsOpen(false)}
-          completedIds={save.completedEncounterIds}
-          facultyUnlocked={coreComplete(save.completedEncounterIds)}
-          onTrainer={(id) => {
-            selectMarker(id);
-            setPanelKind("trainer");
-          }}
-        />
-      ) : (
-        <MapView
+      <MapView
           ref={mapRef}
           provider={Platform.OS === "android" ? PROVIDER_GOOGLE : undefined}
           style={StyleSheet.absoluteFill}
@@ -376,27 +386,33 @@ export function MapScreen() {
           showsMyLocationButton={false}
         >
           {ENCOUNTER_LIST.map((point) => (
-            <Marker
-              key={"trainer-" + point.id}
-              coordinate={{
-                latitude: point.coordinate.latitude + 0.00016,
-                longitude: point.coordinate.longitude + 0.00022,
-              }}
-              onPress={() => {
-                selectMarker(point.id);
-                setPanelKind("trainer");
-              }}
-            >
-              <View style={styles.encounterMarker}>
-                <Image
-                  source={FACULTY[point.id as LandmarkId].portrait}
-                  style={styles.markerCreature}
-                />
-                <Text style={styles.markerCheck}>
-                  {coreComplete(save.completedEncounterIds) ? "!" : "🔒"}
-                </Text>
-              </View>
-            </Marker>
+            <Fragment key={"trainer-" + point.id}>
+              <Circle
+                center={FACULTY_COORDINATES[point.id as LandmarkId]}
+                radius={TRAINER_RADIUS_METERS}
+                fillColor="#8D72E115"
+                strokeColor="#8D72E1"
+                strokeWidth={2}
+              />
+              <Marker
+                coordinate={FACULTY_COORDINATES[point.id as LandmarkId]}
+                tracksViewChanges
+                onPress={() => {
+                  selectMarker(point.id);
+                  setPanelKind("trainer");
+                }}
+              >
+                <View style={styles.encounterMarker}>
+                  <Image
+                    source={FACULTY[point.id as LandmarkId].portrait}
+                    style={styles.markerCreature}
+                  />
+                  <Text style={styles.markerCheck}>
+                    {coreComplete(save.completedEncounterIds) ? "!" : "🔒"}
+                  </Text>
+                </View>
+              </Marker>
+            </Fragment>
           ))}
           {ENCOUNTER_LIST.map((encounter) => {
             const creature = CREATURES[encounter.creatureId];
@@ -414,6 +430,7 @@ export function MapScreen() {
                 />
                 <Marker
                   coordinate={encounter.coordinate}
+                  tracksViewChanges
                   onPress={() => selectMarker(encounter.id)}
                   zIndex={2}
                 >
@@ -462,8 +479,7 @@ export function MapScreen() {
               />
             </View>
           </Marker>
-        </MapView>
-      )}
+      </MapView>
 
       <SafeAreaView pointerEvents="box-none" style={styles.overlay}>
         <View style={styles.topRow}>
@@ -474,6 +490,22 @@ export function MapScreen() {
             </Text>
           </Panel>
           <View style={styles.topButtons}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Return to start"
+              onPress={returnToTitle}
+              style={styles.squareButton}
+            >
+              <Text style={styles.squareIcon}>⌂</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Open elemental guide"
+              onPress={() => setShowElementGuide(true)}
+              style={styles.squareButton}
+            >
+              <Text style={styles.guideIcon}>✦</Text>
+            </Pressable>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Open settings"
@@ -504,20 +536,20 @@ export function MapScreen() {
           accessibilityRole="button"
           accessibilityLabel="Open Pokedex"
           onPress={openCollection}
-          style={{
-            position: "absolute",
-            left: 18,
-            bottom: panelHeight + 148,
-            width: 54,
-            height: 54,
-            borderRadius: 27,
-            backgroundColor: palette.cream,
-            alignItems: "center",
-            justifyContent: "center",
-          }}
+          style={[styles.pokedexButton, { bottom: panelHeight + 24 }]}
         >
           <Image source={echoOrb} style={{ width: 36, height: 36 }} />
         </Pressable>
+        {locationMode === "demo" ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Open demo warp destinations"
+            onPress={() => setShowWarpMenu(true)}
+            style={[styles.warpButton, { bottom: panelHeight + 210 }]}
+          >
+            <Image source={warpIcon} style={styles.warpIcon} />
+          </Pressable>
+        ) : null}
         {locationMode === "demo" ? (
           <View style={[styles.joystickArea, { bottom: panelHeight + 24 }]}>
             <Joystick onVectorChange={handleJoystick} />
@@ -598,9 +630,9 @@ export function MapScreen() {
                       : selectedEncounter.shortName.toUpperCase()}
                   </Text>
                   <Text style={styles.distance}>
-                    {Math.round(selectedDistance)} M AWAY ·{" "}
+                    {Math.round(panelDistance)} M AWAY ·{" "}
                     {panelKind === "trainer"
-                      ? selectedDistance <= 40
+                      ? trainerDistance <= TRAINER_RADIUS_METERS
                         ? "IN RANGE"
                         : "MOVE CLOSER"
                       : selectedComplete
@@ -670,7 +702,7 @@ export function MapScreen() {
                     label={`${save.facultyVictories?.includes(landmark.id as LandmarkId) ? "TALK AGAIN TO" : "TALK TO"} ${FACULTY[landmark.id as LandmarkId].name.toUpperCase()}`}
                     variant="secondary"
                     disabled={
-                      selectedDistance > 40 ||
+                      trainerDistance > TRAINER_RADIUS_METERS ||
                       weakGps ||
                       (locationMode === "gps" && permissionState !== "granted")
                     }
@@ -742,6 +774,85 @@ export function MapScreen() {
           </View>
         ) : null}
       </SafeAreaView>
+
+      <Modal
+        visible={showElementGuide}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowElementGuide(false)}
+      >
+        <View style={styles.guideScrim}>
+          <Panel style={styles.guideModal}>
+            <Text style={styles.smallLabel}>BATTLE BASICS</Text>
+            <Text style={styles.panelTitle}>ELEMENT GUIDE</Text>
+            <Text style={styles.body}>
+              A strong element deals 1.5× damage. A weak element deals 0.75×
+              damage.
+            </Text>
+            <View style={styles.guideList}>
+              {ELEMENT_ADVANTAGES.map(({ element, defeats }) => (
+                <View key={element} style={styles.guideRow}>
+                  <ElementBadge element={element} />
+                  <Text style={styles.guideArrow}>STRONG AGAINST</Text>
+                  <View style={styles.guideTargets}>
+                    {defeats.map((target) => (
+                      <ElementBadge key={target} element={target} />
+                    ))}
+                  </View>
+                </View>
+              ))}
+            </View>
+            <GameButton
+              label="GOT IT"
+              onPress={() => setShowElementGuide(false)}
+            />
+          </Panel>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showWarpMenu}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowWarpMenu(false)}
+      >
+        <View style={styles.guideScrim}>
+          <Panel style={styles.warpModal}>
+            <Text style={styles.smallLabel}>DEMO TOOL</Text>
+            <Text style={styles.panelTitle}>WARP DESTINATION</Text>
+            <Text style={styles.body}>
+              Move the demo character, then tap the marker to enter.
+            </Text>
+            <ScrollView style={styles.warpList}>
+              <GameButton
+                label="CAMPUS CENTER"
+                variant="ghost"
+                onPress={() => warpTo(CAMPUS_CENTER)}
+              />
+              {ENCOUNTER_LIST.map((point) => (
+                <View key={`warp-${point.id}`} style={styles.warpGroup}>
+                  <GameButton
+                    label={`${point.shortName.toUpperCase()} · WILD`}
+                    onPress={() => warpTo(point.coordinate)}
+                  />
+                  <GameButton
+                    label={`${FACULTY[point.id as LandmarkId].name.toUpperCase()} · TRAINER`}
+                    variant="secondary"
+                    onPress={() =>
+                      warpTo(FACULTY_COORDINATES[point.id as LandmarkId])
+                    }
+                  />
+                </View>
+              ))}
+            </ScrollView>
+            <GameButton
+              label="CLOSE"
+              variant="ghost"
+              onPress={() => setShowWarpMenu(false)}
+            />
+          </Panel>
+        </View>
+      </Modal>
 
       <Modal
         visible={showCompanions}
@@ -861,6 +972,40 @@ const styles = StyleSheet.create({
     marginTop: 7,
   },
   topButtons: { flexDirection: "row", gap: 8, marginRight: 44 },
+  warpButton: {
+    position: "absolute",
+    left: 21,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    borderWidth: 2,
+    borderColor: palette.aqua,
+    backgroundColor: palette.navy,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  warpIcon: { width: 34, height: 34, resizeMode: "contain" },
+  pokedexButton: {
+    alignItems: "center",
+    backgroundColor: palette.cream,
+    borderColor: palette.navy,
+    borderRadius: 29,
+    borderWidth: 3,
+    height: 58,
+    justifyContent: "center",
+    left: "50%",
+    marginLeft: -29,
+    position: "absolute",
+    width: 58,
+  },
+  warpModal: {
+    width: "90%",
+    maxHeight: "82%",
+    padding: 18,
+    gap: 10,
+  },
+  warpList: { width: "100%", marginVertical: 4 },
+  warpGroup: { gap: 7, marginBottom: 12 },
   squareButton: {
     alignItems: "center",
     backgroundColor: palette.cream,
@@ -872,6 +1017,7 @@ const styles = StyleSheet.create({
     width: 50,
   },
   squareIcon: { color: palette.navy, fontSize: 22 },
+  guideIcon: { color: palette.aquaDark, fontFamily: fonts.pixelBold, fontSize: 24 },
   modePill: {
     alignSelf: "center",
     borderColor: palette.navy,
@@ -1043,6 +1189,35 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "flex-end",
   },
+  guideScrim: {
+    alignItems: "center",
+    backgroundColor: palette.scrim,
+    flex: 1,
+    justifyContent: "center",
+    padding: 20,
+  },
+  guideModal: { gap: 13, maxWidth: 440, width: "100%" },
+  guideList: { gap: 8 },
+  guideRow: {
+    alignItems: "center",
+    backgroundColor: palette.white,
+    borderColor: palette.line,
+    borderRadius: 12,
+    borderWidth: 2,
+    flexDirection: "row",
+    gap: 8,
+    minHeight: 44,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
+  guideArrow: {
+    color: palette.muted,
+    flex: 1,
+    fontFamily: fonts.pixelBold,
+    fontSize: 7,
+    textAlign: "center",
+  },
+  guideTargets: { flexDirection: "row", gap: 4 },
   companionModal: {
     borderBottomLeftRadius: 0,
     borderBottomRightRadius: 0,

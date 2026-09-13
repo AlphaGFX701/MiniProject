@@ -1,10 +1,21 @@
-import { useEffect, useRef, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
-import { collectOrbHits, qteStage } from "../presentation-rules";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { StyleSheet, Text, View, type LayoutChangeEvent } from "react-native";
+
+import {
+  isQteOrbVisible,
+  qteOrbOpacity,
+  qteRating,
+  qteStage,
+  QTE_ORB_COUNT,
+  QTE_WAVE_SIZE,
+  QTE_TIMING,
+  segmentHitsCircle,
+  type Point,
+} from "../presentation-rules";
 import { useGame } from "../game-context";
 import type { Element } from "../types";
 import { elementColors, palette } from "../theme";
-import { randomOrbLayout } from "../team-battle";
+
 const symbols: Record<Element, string> = {
   fire: "✦",
   water: "●",
@@ -13,6 +24,31 @@ const symbols: Record<Element, string> = {
   psychic: "◎",
   dark: "☾",
 };
+
+type OrbPosition = { x: number; y: number; size: number };
+
+function createOrbPositions(): OrbPosition[] {
+  const positions: OrbPosition[] = [];
+  for (let index = 0; index < QTE_ORB_COUNT; index += 1) {
+    let candidate: OrbPosition = { x: 0.5, y: 0.5, size: 44 };
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      candidate = {
+        x: 0.1 + Math.random() * 0.8,
+        y: 0.12 + Math.random() * 0.76,
+        size: 40 + Math.round(Math.random() * 12),
+      };
+      const wave = Math.floor(index / QTE_WAVE_SIZE);
+      const clear = positions.every((other, otherIndex) => {
+        const otherWave = Math.floor(otherIndex / QTE_WAVE_SIZE);
+        if (Math.abs(otherWave - wave) > 1) return true;
+        return Math.hypot(candidate.x - other.x, candidate.y - other.y) > 0.13;
+      });
+      if (clear) break;
+    }
+    positions.push(candidate);
+  }
+  return positions;
+}
 
 export function ChargeChallenge({
   element,
@@ -24,107 +60,158 @@ export function ChargeChallenge({
   onComplete: (count: number) => void;
 }) {
   const { save, markHint } = useGame();
-  const [width, setWidth] = useState(300);
-  const [layout] = useState(() => randomOrbLayout());
+  const [fieldSize, setFieldSize] = useState({ width: 300, height: 300 });
+  const positions = useMemo(() => createOrbPositions(), []);
   const [elapsed, setElapsed] = useState(0);
-  const [collected, setCollected] = useState<number[]>([]);
-  const hits = useRef(new Set<number>());
-  const finished = useRef(false);
+  const [collectedAt, setCollectedAt] = useState<Record<number, number>>({});
+  const collectedRef = useRef<Record<number, number>>({});
   const elapsedRef = useRef(0);
+  const previousTouch = useRef<Point | null>(null);
+  const finished = useRef(false);
   const onDone = useRef(onComplete);
+
   useEffect(() => {
     onDone.current = onComplete;
   }, [onComplete]);
+
   useEffect(() => {
     if (!active) return;
+    const startedAt = Date.now();
     const timer = setInterval(() => {
-      elapsedRef.current += 50;
-      setElapsed(elapsedRef.current);
-      if (qteStage(elapsedRef.current) === "done" && !finished.current) {
+      const nextElapsed = Date.now() - startedAt;
+      elapsedRef.current = nextElapsed;
+      setElapsed(nextElapsed);
+      if (qteStage(nextElapsed) === "done" && !finished.current) {
         finished.current = true;
         markHint("qteHintSeen");
-        onDone.current(hits.current.size);
+        onDone.current(Object.keys(collectedRef.current).length);
       }
-    }, 50);
+    }, 40);
     return () => clearInterval(timer);
   }, [active, markHint]);
-  const orbs = layout.map((orb) => ({
-    x: width * orb.x,
-    y: orb.y + Math.sin(elapsed / 350 + orb.offset) * 2,
-  }));
-  const collect = (x: number, y: number) => {
-    if (!active || finished.current || elapsed < 1000 || elapsed >= 6000)
+
+  const collectAlong = (point: Point) => {
+    const start = previousTouch.current;
+    previousTouch.current = point;
+    if (
+      !start ||
+      !active ||
+      finished.current ||
+      qteStage(elapsedRef.current) !== "collect"
+    )
       return;
-    hits.current = collectOrbHits(hits.current, orbs, { x, y }, elapsed);
-    setCollected([...hits.current]);
+
+    const additions: Record<number, number> = {};
+    positions.forEach((orb, index) => {
+      if (
+        collectedRef.current[index] !== undefined ||
+        !isQteOrbVisible(index, elapsedRef.current) ||
+        !segmentHitsCircle(
+          start,
+          point,
+          { x: orb.x * fieldSize.width, y: orb.y * fieldSize.height },
+          orb.size * 0.72,
+        )
+      )
+        return;
+      additions[index] = elapsedRef.current;
+    });
+    if (Object.keys(additions).length === 0) return;
+    collectedRef.current = { ...collectedRef.current, ...additions };
+    setCollectedAt(collectedRef.current);
   };
+
+  const onLayout = (event: LayoutChangeEvent) =>
+    setFieldSize({
+      width: event.nativeEvent.layout.width,
+      height: event.nativeEvent.layout.height,
+    });
+  const stage = qteStage(elapsed);
+  const collectEnd = QTE_TIMING.prepare + QTE_TIMING.collect;
+  const count = Object.keys(collectedAt).length;
+
   return (
     <View style={styles.overlay}>
       <Text style={styles.title}>
-        {elapsed < 1000
+        {stage === "ready"
           ? "GET READY"
-          : elapsed >= 6000
-            ? "CHARGE COMPLETE"
+          : stage === "result" || stage === "done"
+            ? qteRating(count)
             : "CHARGE YOUR ULTIMATE"}
       </Text>
       <Text style={styles.copy}>
         {!save.qteHintSeen
-          ? "Drag through the orbs"
+          ? "Hold and sweep through the orbs"
           : `${element.toUpperCase()} ENERGY`}
       </Text>
-      <Text style={styles.title}>
-        {Math.max(0, (6000 - Math.max(1000, elapsed)) / 1000).toFixed(1)}s ·{" "}
-        {collected.length}
-        /10
+      <Text style={styles.counter}>
+        {stage === "ready"
+          ? "0.8s"
+          : `${Math.max(0, (collectEnd - elapsed) / 1000).toFixed(1)}s`}{" "}
+        · COLLECTED {count}/{QTE_ORB_COUNT}
       </Text>
       <View
         style={styles.field}
-        onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
+        onLayout={onLayout}
         onStartShouldSetResponder={() => true}
         onMoveShouldSetResponder={() => true}
-        onResponderGrant={(e) =>
-          collect(e.nativeEvent.locationX, e.nativeEvent.locationY)
+        onResponderGrant={(event) => {
+          previousTouch.current = {
+            x: event.nativeEvent.locationX,
+            y: event.nativeEvent.locationY,
+          };
+        }}
+        onResponderMove={(event) =>
+          collectAlong({
+            x: event.nativeEvent.locationX,
+            y: event.nativeEvent.locationY,
+          })
         }
-        onResponderMove={(e) =>
-          collect(e.nativeEvent.locationX, e.nativeEvent.locationY)
-        }
+        onResponderRelease={() => {
+          previousTouch.current = null;
+        }}
+        onResponderTerminate={() => {
+          previousTouch.current = null;
+        }}
       >
-        <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-          {orbs.map((orb, i) => (
-            <View
-              key={i}
-              style={[
-                styles.orb,
-                {
-                  left: orb.x - 25,
-                  top: orb.y - 25,
-                  backgroundColor: elementColors[element],
-                  opacity:
-                    elapsed < 1000 + Math.floor(i / 2) * 800
-                      ? 0
-                      : collected.includes(i)
-                        ? 0.12
-                        : 1,
-                },
-              ]}
-            >
-              <Text style={styles.symbol}>{symbols[element]}</Text>
-            </View>
-          ))}
-        </View>
+        {stage === "collect"
+          ? positions.map((orb, index) => {
+              const collected = collectedAt[index];
+              const opacity = qteOrbOpacity(index, elapsed, collected);
+              if (opacity <= 0) return null;
+              return (
+                <View
+                  key={index}
+                  pointerEvents="none"
+                  style={[
+                    styles.orb,
+                    {
+                      width: orb.size,
+                      height: orb.size,
+                      borderRadius: orb.size / 2,
+                      left: orb.x * fieldSize.width - orb.size / 2,
+                      top: orb.y * fieldSize.height - orb.size / 2,
+                      backgroundColor: elementColors[element],
+                      opacity,
+                      transform: [
+                        { scale: collected === undefined ? 1 : 1.25 },
+                      ],
+                    },
+                  ]}
+                >
+                  <Text style={[styles.symbol, { fontSize: orb.size * 0.55 }]}>
+                    {symbols[element]}
+                  </Text>
+                </View>
+              );
+            })
+          : null}
       </View>
-      <Text style={styles.title}>
-        {collected.length >= 9
-          ? "EXCELLENT"
-          : collected.length >= 6
-            ? "GREAT"
-            : collected.length >= 1
-              ? "NICE"
-              : "KEEP SWIPING"}
-      </Text>
+      <Text style={styles.rating}>{qteRating(count)}</Text>
     </View>
   );
 }
+
 const styles = StyleSheet.create({
   overlay: {
     position: "absolute",
@@ -145,16 +232,31 @@ const styles = StyleSheet.create({
     margin: 12,
   },
   copy: { color: "white", textAlign: "center" },
-  field: { height: 300, width: "100%" },
+  counter: {
+    color: "white",
+    fontSize: 17,
+    fontWeight: "700",
+    textAlign: "center",
+    marginTop: 10,
+  },
+  field: { height: 300, width: "100%", overflow: "hidden" },
   orb: {
     position: "absolute",
-    width: 50,
-    height: 50,
-    borderRadius: 25,
     borderWidth: 3,
     borderColor: "white",
     alignItems: "center",
     justifyContent: "center",
+    shadowColor: "white",
+    shadowOpacity: 0.8,
+    shadowRadius: 8,
+    elevation: 6,
   },
-  symbol: { fontSize: 28, color: "white" },
+  symbol: { color: "white" },
+  rating: {
+    color: palette.yellow,
+    fontSize: 20,
+    fontWeight: "bold",
+    minHeight: 28,
+    textAlign: "center",
+  },
 });

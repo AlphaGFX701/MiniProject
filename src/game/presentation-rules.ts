@@ -1,8 +1,13 @@
 export const QTE_TIMING = {
-  prepare: 1000,
-  collect: 5000,
-  result: 800,
+  prepare: 750,
+  collect: 4000,
+  result: 700,
 } as const;
+export const QTE_ORB_COUNT = 20;
+export const QTE_WAVE_SIZE = 5;
+export const QTE_WAVE_INTERVAL = 950;
+export const QTE_ORB_LIFETIME = 1450;
+export const QTE_ORB_FADE = 200;
 export const WILD_BASIC_DAMAGE = 4;
 export const WILD_ULTIMATE_DAMAGE = 15;
 
@@ -16,28 +21,67 @@ export function qteStage(
   return "done";
 }
 
-export function orbAvailable(index: number, elapsed: number) {
+export type Point = { x: number; y: number };
+
+export function qteOrbSpawnAt(index: number) {
+  return QTE_TIMING.prepare + Math.floor(index / QTE_WAVE_SIZE) * QTE_WAVE_INTERVAL;
+}
+
+export function isQteOrbVisible(
+  index: number,
+  elapsed: number,
+  collectedAt?: number,
+) {
+  const spawnAt = qteOrbSpawnAt(index);
+  if (qteStage(elapsed) !== "collect" || elapsed < spawnAt) return false;
+  if (collectedAt !== undefined) return elapsed < collectedAt + QTE_ORB_FADE;
+  return elapsed <= spawnAt + QTE_ORB_LIFETIME;
+}
+
+export function qteOrbOpacity(
+  index: number,
+  elapsed: number,
+  collectedAt?: number,
+) {
+  const spawnAt = qteOrbSpawnAt(index);
+  if (!isQteOrbVisible(index, elapsed, collectedAt)) return 0;
+  if (collectedAt !== undefined)
+    return Math.max(0, 1 - (elapsed - collectedAt) / QTE_ORB_FADE);
+  const fadeAt = spawnAt + QTE_ORB_LIFETIME - QTE_ORB_FADE;
+  return elapsed <= fadeAt
+    ? 1
+    : Math.max(0, 1 - (elapsed - fadeAt) / QTE_ORB_FADE);
+}
+
+export function segmentHitsCircle(
+  start: Point,
+  end: Point,
+  center: Point,
+  radius: number,
+) {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const lengthSquared = dx * dx + dy * dy;
+  const t =
+    lengthSquared === 0
+      ? 0
+      : Math.max(
+          0,
+          Math.min(
+            1,
+            ((center.x - start.x) * dx + (center.y - start.y) * dy) /
+              lengthSquared,
+          ),
+        );
   return (
-    index >= 0 &&
-    index < 10 &&
-    qteStage(elapsed) === "collect" &&
-    elapsed >= QTE_TIMING.prepare + Math.floor(index / 2) * 800
+    Math.hypot(start.x + t * dx - center.x, start.y + t * dy - center.y) <=
+    radius
   );
 }
 
-export function collectOrbHits(
-  previous: ReadonlySet<number>,
-  orbs: { x: number; y: number }[],
-  point: { x: number; y: number },
-  elapsed: number,
-): Set<number> {
-  const hits = new Set(previous);
-  orbs.forEach((orb, index) => {
-    if (
-      orbAvailable(index, elapsed) &&
-      Math.hypot(orb.x - point.x, orb.y - point.y) <= 36
-    )
-      hits.add(index);
-  });
-  return hits;
+export function qteRating(hits: number) {
+  if (hits >= 17) return "EXCELLENT";
+  if (hits >= 12) return "GREAT";
+  if (hits >= 7) return "NICE";
+  return "KEEP SWIPING";
 }

@@ -11,7 +11,7 @@ const EARTH_RADIUS_METERS = 6_371_000;
 
 export function typeMultiplier(attacker: Element, defender: Element): number {
   const strengths: Record<Element, Element[]> = {
-    fire: ["grass", "ice"],
+    fire: ["grass", "ice", "dark"],
     water: ["fire"],
     grass: ["water"],
     ice: ["grass"],
@@ -124,6 +124,10 @@ export function sanitizeSave(value: unknown): GameSaveV1 | null {
       const creature = ENCOUNTERS[id].creatureId;
       if (!ownership.includes(creature)) ownership.push(creature);
     });
+  const playerName =
+    typeof candidate.playerName === "string"
+      ? candidate.playerName.trim().slice(0, 20)
+      : "";
   return {
     schemaVersion: 2,
     starterId: STARTER_IDS.includes(candidate.starterId as CreatureId)
@@ -131,6 +135,7 @@ export function sanitizeSave(value: unknown): GameSaveV1 | null {
       : legacy
         ? STARTER_IDS[0]
         : undefined,
+    playerName: playerName || undefined,
     facultyVictories: Array.isArray(candidate.facultyVictories)
       ? [
           ...new Set(

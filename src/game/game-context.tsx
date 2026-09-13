@@ -15,7 +15,7 @@ import {
   STARTER_IDS,
   coreComplete,
 } from "./data";
-import { loadGame, persistGame } from "./storage";
+import { loadSaveSlots, persistSaveSlots } from "./storage";
 import { chooseStarter, recordCapture } from "./save-rules";
 import type {
   Coordinate,
@@ -24,6 +24,7 @@ import type {
   GameSaveV1,
   GameScreen,
   LocationMode,
+  SaveSlots,
 } from "./types";
 
 type GameContextValue = {
@@ -32,6 +33,7 @@ type GameContextValue = {
   markHint: (key: "mapHintSeen" | "qteHintSeen" | "facultyNoticeSeen") => void;
   awardCapture: () => void;
   save: GameSaveV1;
+  saveSlots: SaveSlots;
   hydrated: boolean;
   screen: GameScreen;
   activeEncounterId: EncounterId | null;
@@ -39,6 +41,12 @@ type GameContextValue = {
   locationMode: LocationMode;
   demoCoordinate: Coordinate;
   beginExpedition: (starter: CreatureId) => void;
+  setPlayerName: (name: string) => void;
+  continueFromTitle: () => void;
+  selectSaveSlot: (slot: number) => void;
+  startNewSaveSlot: (slot: number) => void;
+  deleteSaveSlot: (slot: number) => void;
+  returnToTitle: () => void;
   trainerId: import("./types").LandmarkId | null;
   openTrainer: (id: import("./types").LandmarkId) => void;
   winTrainer: (id: import("./types").LandmarkId) => void;
@@ -62,9 +70,12 @@ const GameContext = createContext<GameContextValue | null>(null);
 export function GameProvider({ children }: { children: ReactNode }) {
   const [victoryMusic, setVictoryMusic] = useState(false);
   const [save, setSave] = useState<GameSaveV1>(INITIAL_SAVE);
+  const [saveSlots, setSaveSlots] = useState<SaveSlots>([null, null, null]);
+  const [activeSaveSlot, setActiveSaveSlot] = useState<number | null>(null);
+  const [pendingSaveSlot, setPendingSaveSlot] = useState<number | null>(null);
   const [hydrated, setHydrated] = useState(false);
   const [battleNumber, setBattleNumber] = useState(0);
-  const [screen, setScreen] = useState<GameScreen>("onboarding");
+  const [screen, setScreen] = useState<GameScreen>("title");
   const [trainerId, setTrainerId] = useState<
     import("./types").LandmarkId | null
   >(null);
@@ -78,18 +89,10 @@ export function GameProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let mounted = true;
-    loadGame().then((loaded) => {
+    loadSaveSlots().then((slots) => {
       if (!mounted) return;
-      setSave(loaded);
-      setSelectedCompanionId(loaded.activeCompanionId);
-      setScreen(
-        loaded.onboardingCompleted
-          ? coreComplete(loaded.completedEncounterIds) &&
-            !loaded.facultyNoticeSeen
-            ? "complete"
-            : "map"
-          : "onboarding",
-      );
+      setSaveSlots(slots);
+      setScreen("title");
       setHydrated(true);
     });
     return () => {
@@ -108,11 +111,20 @@ export function GameProvider({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
-    if (hydrated)
-      void persistGame(save).catch(() =>
-        console.warn("Unable to save expedition progress."),
-      );
-  }, [save, hydrated]);
+    if (!hydrated || activeSaveSlot === null) return;
+    const timer = setTimeout(() => {
+      setSaveSlots((current) => {
+        if (current[activeSaveSlot] === save) return current;
+        const next = [...current] as SaveSlots;
+        next[activeSaveSlot] = save;
+        void persistSaveSlots(next).catch(() =>
+          console.warn("Unable to save expedition progress."),
+        );
+        return next;
+      });
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [activeSaveSlot, hydrated, save]);
 
   const beginExpedition = useCallback(
     (starter: CreatureId) => {
@@ -124,6 +136,95 @@ export function GameProvider({ children }: { children: ReactNode }) {
     },
     [commitSave, save.ownedCreatureIds.length],
   );
+
+  const setPlayerName = useCallback(
+    (name: string) => {
+      const playerName = name.trim().slice(0, 20);
+      if (!playerName || pendingSaveSlot === null) return;
+      const namedSave = { ...save, playerName };
+      const slot = pendingSaveSlot;
+      setSave(namedSave);
+      setActiveSaveSlot(slot);
+      setPendingSaveSlot(null);
+      setSaveSlots((current) => {
+        const next = [...current] as SaveSlots;
+        next[slot] = namedSave;
+        void persistSaveSlots(next).catch(() =>
+          console.warn("Unable to create saved expedition."),
+        );
+        return next;
+      });
+      setScreen("onboarding");
+    },
+    [pendingSaveSlot, save],
+  );
+
+  const continueFromTitle = useCallback(() => {
+    setPendingSaveSlot(null);
+    setScreen("login");
+  }, []);
+
+  const resumeSave = useCallback((loaded: GameSaveV1) => {
+    setScreen(
+      loaded.onboardingCompleted
+        ? coreComplete(loaded.completedEncounterIds) && !loaded.facultyNoticeSeen
+          ? "complete"
+          : "map"
+        : "onboarding",
+    );
+  }, []);
+
+  const selectSaveSlot = useCallback(
+    (slot: number) => {
+      const loaded = saveSlots[slot];
+      if (!loaded) return;
+      setPendingSaveSlot(null);
+      setActiveSaveSlot(slot);
+      setSave(loaded);
+      setSelectedCompanionId(loaded.activeCompanionId);
+      resumeSave(loaded);
+    },
+    [resumeSave, saveSlots],
+  );
+
+  const startNewSaveSlot = useCallback(
+    (slot: number) => {
+      if (saveSlots[slot]) return;
+      const fresh = INITIAL_SAVE();
+      setPendingSaveSlot(slot);
+      setActiveSaveSlot(null);
+      setSave(fresh);
+      setSelectedCompanionId(fresh.activeCompanionId);
+      setScreen("name");
+    },
+    [saveSlots],
+  );
+
+  const deleteSaveSlot = useCallback(
+    (slot: number) => {
+      if (!saveSlots[slot]) return;
+      setSaveSlots((current) => {
+        const next = [...current] as SaveSlots;
+        next[slot] = null;
+        void persistSaveSlots(next).catch(() =>
+          console.warn("Unable to delete saved expedition."),
+        );
+        return next;
+      });
+      if (activeSaveSlot === slot) {
+        setActiveSaveSlot(null);
+        setSave(INITIAL_SAVE());
+      }
+    },
+    [activeSaveSlot, saveSlots],
+  );
+
+  const returnToTitle = useCallback(() => {
+    setVictoryMusic(false);
+    setTrainerId(null);
+    setActiveEncounterId(null);
+    setScreen("title");
+  }, []);
 
   const markHint = useCallback(
     (key: "mapHintSeen" | "qteHintSeen" | "facultyNoticeSeen") => {
@@ -218,6 +319,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
     setVictoryMusic(false);
     const fresh = {
       ...INITIAL_SAVE(),
+      playerName: save.playerName,
       soundEnabled: save.soundEnabled,
       musicEnabled: save.musicEnabled,
     };
@@ -227,7 +329,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
     setLocationModeState("gps");
     setSave(fresh);
     setScreen("onboarding");
-  }, [save.soundEnabled, save.musicEnabled]);
+  }, [save.playerName, save.soundEnabled, save.musicEnabled]);
 
   const openTrainer = useCallback(
     (id: import("./types").LandmarkId) => {
@@ -256,6 +358,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
       markHint,
       awardCapture,
       save,
+      saveSlots,
       hydrated,
       trainerId,
       openTrainer,
@@ -266,6 +369,12 @@ export function GameProvider({ children }: { children: ReactNode }) {
       locationMode,
       demoCoordinate,
       beginExpedition,
+      setPlayerName,
+      continueFromTitle,
+      selectSaveSlot,
+      startNewSaveSlot,
+      deleteSaveSlot,
+      returnToTitle,
       openCollection: () => setScreen("collection"),
       openSettings: () => setScreen("settings"),
       returnToMap,
@@ -289,6 +398,12 @@ export function GameProvider({ children }: { children: ReactNode }) {
       openTrainer,
       winTrainer,
       beginExpedition,
+      setPlayerName,
+      continueFromTitle,
+      selectSaveSlot,
+      startNewSaveSlot,
+      deleteSaveSlot,
+      returnToTitle,
       completeBattle,
       completeCapture,
       demoCoordinate,
@@ -297,6 +412,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
       resetProgress,
       returnToMap,
       save,
+      saveSlots,
       screen,
       selectedCompanionId,
       setActiveCompanion,

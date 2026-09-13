@@ -62,8 +62,11 @@ export function CaptureScreen() {
   const sceneElapsed = useRef(0);
   const hitCountRef = useRef(0);
   const targetLoopRef = useRef<Animated.CompositeAnimation | null>(null);
+  const mountedRef = useRef(true);
+  const captureAwardedRef = useRef(false);
+  const continueLockedRef = useRef(false);
 
-  const audioOptions = { downloadFirst: true };
+  const audioOptions = { keepAudioSessionActive: true };
   const throwPlayer = useAudioPlayer(gameAudio.throw, audioOptions);
   const bouncePlayer = useAudioPlayer(gameAudio.bounce, audioOptions);
   const capturePlayer = useAudioPlayer(gameAudio.capture, audioOptions);
@@ -72,8 +75,12 @@ export function CaptureScreen() {
     (player: AudioPlayer) => {
       if (!save.soundEnabled) return;
       player.volume = 1;
-      void player.seekTo(0).catch(() => undefined);
-      player.play();
+      void player
+        .seekTo(0)
+        .then(() => {
+          if (mountedRef.current) player.play();
+        })
+        .catch(() => undefined);
     },
     [save.soundEnabled],
   );
@@ -84,6 +91,17 @@ export function CaptureScreen() {
     );
     return () => subscription.remove();
   }, []);
+
+  useEffect(
+    () => () => {
+      mountedRef.current = false;
+      targetLoopRef.current?.stop();
+      ball.stopAnimation();
+      spin.stopAnimation();
+      absorb.stopAnimation();
+    },
+    [absorb, ball, spin],
+  );
 
   useEffect(() => {
     if (
@@ -125,14 +143,20 @@ export function CaptureScreen() {
 
   useEffect(() => {
     if (!appActive || capture.status !== "captured" || resultReady) return;
-    const timer = setInterval(() => {
-      resultElapsed.current += 50;
-      if (resultElapsed.current >= 1500) setResultReady(true);
-    }, 50);
-    return () => clearInterval(timer);
+    const remaining = Math.max(0, 1500 - resultElapsed.current);
+    const startedAt = Date.now();
+    const timer = setTimeout(() => {
+      resultElapsed.current = 1500;
+      if (mountedRef.current) setResultReady(true);
+    }, remaining);
+    return () => {
+      resultElapsed.current += Date.now() - startedAt;
+      clearTimeout(timer);
+    };
   }, [appActive, capture.status, resultReady]);
   useEffect(() => {
-    if (capture.status === "captured") {
+    if (capture.status === "captured" && !captureAwardedRef.current) {
+      captureAwardedRef.current = true;
       awardCapture();
       setVictoryMusic(true);
     }
@@ -171,6 +195,7 @@ export function CaptureScreen() {
           useNativeDriver: true,
         }),
       ]).start(() => {
+        if (!mountedRef.current) return;
         if (!hit) {
           play(bouncePlayer);
           setCapture((current) => ({ ...current, status: "missed" }));
@@ -191,6 +216,7 @@ export function CaptureScreen() {
               useNativeDriver: true,
             }),
           ]).start(() => {
+            if (!mountedRef.current) return;
             setMessage("AIM AHEAD OF THE MOVING ECHO");
             resetBall();
           });
@@ -226,10 +252,8 @@ export function CaptureScreen() {
 
   useEffect(() => {
     if (!appActive || !scene || capture.status !== "sealing") return;
-    const timer = setInterval(() => {
-      sceneElapsed.current += 50;
-      if (sceneElapsed.current < 650) return;
-      sceneElapsed.current = 0;
+    const timer = setTimeout(() => {
+      if (!mountedRef.current) return;
       if (scene.step < scene.shakes) {
         play(bouncePlayer);
         setMessage("• ".repeat(scene.step + 1).trim());
@@ -265,8 +289,8 @@ export function CaptureScreen() {
         }
         setScene(null);
       }
-    }, 50);
-    return () => clearInterval(timer);
+    }, Math.max(0, 650 - sceneElapsed.current));
+    return () => clearTimeout(timer);
   }, [
     appActive,
     scene,
@@ -319,6 +343,12 @@ export function CaptureScreen() {
     inputRange: [0, 1],
     outputRange: ["0deg", "900deg"],
   });
+  const continueCapture = () => {
+    if (continueLockedRef.current) return;
+    continueLockedRef.current = true;
+    setVictoryMusic(false);
+    completeCapture();
+  };
 
   return (
     <ImageBackground
@@ -415,7 +445,7 @@ export function CaptureScreen() {
             <GameButton
               label="CONTINUE"
               disabled={!resultReady || !appActive}
-              onPress={completeCapture}
+              onPress={continueCapture}
             />
           ) : null}
         </Panel>

@@ -5,10 +5,10 @@ import { INITIAL_SAVE } from "./data";
 describe("refined combat and capture", () => {
   it("weak missed charge still deals damage and complete charge reaches fifty", () => {
     expect(chargedDamage(0)).toBe(15);
-    expect(chargedDamage(10)).toBe(50);
+    expect(chargedDamage(24)).toBe(50);
     expect(chargedDamage(-1)).toBe(15);
     expect(chargedDamage(100)).toBe(50);
-    for (let n = 1; n <= 10; n++)
+    for (let n = 1; n <= 24; n++)
       expect(chargedDamage(n)).toBeGreaterThan(chargedDamage(n - 1));
   });
   it("shield blocks eighty percent after damage calculation", () => {

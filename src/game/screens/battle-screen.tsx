@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Animated,
   AppState,
   ImageBackground,
   Pressable,
@@ -12,7 +13,11 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { ElementImpact } from "../components/element-impact";
 import { ChargeChallenge } from "../components/charge-challenge";
-import { WILD_BASIC_DAMAGE, WILD_ULTIMATE_DAMAGE } from "../presentation-rules";
+import {
+  qteRating,
+  WILD_BASIC_DAMAGE,
+  WILD_ULTIMATE_DAMAGE,
+} from "../presentation-rules";
 import { chargedDamage } from "../combat-rules";
 import { battleBackgrounds, gameAudio } from "../assets";
 import { AnimatedCreature } from "../components/animated-creature";
@@ -66,13 +71,29 @@ export function BattleScreen() {
   const [appActive, setAppActive] = useState(true);
   const [phase, setPhase] = useState<"fight" | "charge" | "warning">("fight");
   const [notice, setNotice] = useState("");
+  const [noticeScale] = useState(() => new Animated.Value(0));
+  const [noticeOpacity] = useState(() => new Animated.Value(0));
   const enemyAttacks = useRef(0);
   const phaseLock = useRef(false);
   const shieldTime = useRef(0);
   const lastTapRef = useRef(0);
+  const pendingTimeouts = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+  const mountedRef = useRef(true);
+  const transitionScheduled = useRef(false);
+  const chargeResolved = useRef(false);
 
-  const audioOptions = { downloadFirst: true };
-  const faint = useAudioPlayer(gameAudio.faint, audioOptions);
+  const schedule = useCallback((callback: () => void, delay: number) => {
+    const timer = setTimeout(() => {
+      pendingTimeouts.current.delete(timer);
+      if (!mountedRef.current) return;
+      callback();
+    }, delay);
+    pendingTimeouts.current.add(timer);
+  }, []);
+
+  const faint = useAudioPlayer(gameAudio.faint, {
+    keepAudioSessionActive: true,
+  });
   const playCombat = useCombatAudio(save.soundEnabled);
 
   const play = useCallback(
@@ -94,6 +115,15 @@ export function BattleScreen() {
     return () => subscription.remove();
   }, []);
 
+  useEffect(
+    () => () => {
+      mountedRef.current = false;
+      pendingTimeouts.current.forEach(clearTimeout);
+      pendingTimeouts.current.clear();
+    },
+    [],
+  );
+
   useEffect(() => {
     if (battle.status !== "active" || !appActive || phase !== "fight") return;
     const timer = setInterval(() => {
@@ -106,7 +136,7 @@ export function BattleScreen() {
         return;
       }
       setEnemyAction("attack");
-      setTimeout(() => setEnemyAction("idle"), 300);
+      schedule(() => setEnemyAction("idle"), 300);
       playCombat(enemy.element);
       setBattle((current) => {
         if (current.status !== "active") return current;
@@ -132,12 +162,23 @@ export function BattleScreen() {
     playCombat,
     selectedCompanionId,
     phase,
+    schedule,
   ]);
 
   useEffect(() => {
-    if (battle.status === "won" && appActive) {
-      const timer = setTimeout(completeBattle, 1500);
-      return () => clearTimeout(timer);
+    if (battle.status === "won" && appActive && !transitionScheduled.current) {
+      transitionScheduled.current = true;
+      phaseLock.current = true;
+      setEnemyAction("idle");
+      let transitioned = false;
+      const timer = setTimeout(() => {
+        transitioned = true;
+        if (mountedRef.current) completeBattle();
+      }, 1500);
+      return () => {
+        clearTimeout(timer);
+        if (!transitioned) transitionScheduled.current = false;
+      };
     }
     if (battle.status === "lost") play(faint);
   }, [appActive, battle.status, completeBattle, play, faint]);
@@ -155,7 +196,7 @@ export function BattleScreen() {
     lastTapRef.current = now;
     setPlayerAction("attack");
     setImpactKey((n) => n + 1);
-    setTimeout(() => setPlayerAction("idle"), 260);
+    schedule(() => setPlayerAction("idle"), 260);
     playCombat(companion.element);
     setBattle((current) => {
       if (current.status !== "active") return current;
@@ -182,16 +223,31 @@ export function BattleScreen() {
     )
       return;
     phaseLock.current = true;
+    chargeResolved.current = false;
     setBattle((current) => ({ ...current, energy: 0 }));
     setPhase("charge");
   };
   const finishCharge = (count: number) => {
+    if (chargeResolved.current || battle.status !== "active") return;
+    chargeResolved.current = true;
     setUltimateKey((n) => n + 1);
     setImpactKey((n) => n + 1);
     setPlayerAction("attack");
-    setTimeout(() => setPlayerAction("idle"), 500);
+    schedule(() => setPlayerAction("idle"), 500);
     playCombat(companion.element, true);
-    setNotice(count >= 9 ? "EXCELLENT!" : count >= 6 ? "GREAT!" : "NICE!");
+    const noticeText = `${qteRating(count)}!`;
+    setNotice(noticeText);
+    // Bounce in
+    noticeScale.setValue(0);
+    noticeOpacity.setValue(0);
+    Animated.parallel([
+      Animated.spring(noticeScale, { toValue: 1, useNativeDriver: true, speed: 14, bounciness: 18 }),
+      Animated.timing(noticeOpacity, { toValue: 1, duration: 150, useNativeDriver: true }),
+    ]).start(() => {
+      schedule(() => {
+        Animated.timing(noticeOpacity, { toValue: 0, duration: 600, useNativeDriver: true }).start();
+      }, 900);
+    });
     setBattle((current) => {
       const enemyHp = Math.max(
         0,
@@ -245,6 +301,8 @@ export function BattleScreen() {
     setNotice("");
     enemyAttacks.current = 0;
     phaseLock.current = false;
+    transitionScheduled.current = false;
+    chargeResolved.current = false;
   };
 
   const matchup = typeMultiplier(companion.element, enemy.element);
@@ -312,15 +370,21 @@ export function BattleScreen() {
           style={styles.arena}
           resizeMode="stretch"
         >
-          <Text
+          <Animated.Text
             style={{
               color: palette.yellow,
               textAlign: "center",
-              fontWeight: "bold",
+              fontFamily: fonts.pixelBold,
+              fontSize: 22,
+              textShadowColor: palette.navy,
+              textShadowOffset: { width: 0, height: 3 },
+              textShadowRadius: 0,
+              opacity: noticeOpacity,
+              transform: [{ scale: noticeScale }],
             }}
           >
             {notice}
-          </Text>
+          </Animated.Text>
           <View style={styles.enemyCreature}>
             <View style={styles.platform} />
             {ultimateKey > 0 ? (
@@ -442,7 +506,7 @@ export function BattleScreen() {
         ) : null}
         {battle.status === "won" ? (
           <View style={styles.winBanner}>
-            <Text style={styles.winText}>BATTLE WON · CAPTURE READY</Text>
+            <Text style={styles.winText}>⭐  BATTLE WON · CAPTURE READY  ⭐</Text>
           </View>
         ) : null}
       </SafeAreaView>
@@ -589,10 +653,15 @@ const styles = StyleSheet.create({
     borderColor: palette.navy,
     borderRadius: 999,
     borderWidth: 3,
-    paddingHorizontal: 18,
-    paddingVertical: 12,
+    paddingHorizontal: 22,
+    paddingVertical: 14,
     position: "absolute",
-    top: "48%",
+    top: "46%",
+    shadowColor: palette.glowYellow,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 1,
+    shadowRadius: 18,
+    elevation: 12,
   },
-  winText: { color: palette.navy, fontFamily: fonts.pixelBold, fontSize: 9 },
+  winText: { color: palette.navy, fontFamily: fonts.pixelBold, fontSize: 10 },
 });

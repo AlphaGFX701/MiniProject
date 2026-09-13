@@ -2,11 +2,14 @@ import { describe, it, expect } from "vitest";
 import {
   createTeamBattle,
   teamBattleReducer as reduce,
+  bossTeamWithCounter,
   randomBossTeam,
+  trainerAttackDelay,
   validTeam,
   randomOrbLayout,
+  TRAINER_RULES,
 } from "./team-battle";
-import { INITIAL_SAVE, PLAYER_IDS, BOSS_IDS } from "./data";
+import { INITIAL_SAVE, PLAYER_IDS, BOSS_IDS, CREATURES } from "./data";
 import { sanitizeSave, typeMultiplier } from "./logic";
 import type { CreatureId, Element } from "./types";
 const team: CreatureId[] = ["charmadillo", "friolera", "pouch"];
@@ -34,6 +37,33 @@ describe("faculty expansion", () => {
       expect(new Set(ids).size).toBe(3);
       expect(ids.every((id) => BOSS_IDS.includes(id))).toBe(true);
     }
+  });
+  it("builds a hidden team with exactly one counter to the opening companion", () => {
+    for (const playerId of PLAYER_IDS) {
+      const ids = bossTeamWithCounter(playerId, () => 0.42);
+      expect(new Set(ids).size).toBe(3);
+      expect(ids.every((id) => BOSS_IDS.includes(id))).toBe(true);
+      expect(
+        ids.filter(
+          (id) =>
+            typeMultiplier(
+              CREATURES[id].element,
+              CREATURES[playerId].element,
+            ) > 1,
+        ),
+      ).toHaveLength(1);
+    }
+  });
+  it("uses a fast but human-like randomized trainer attack delay", () => {
+    expect(trainerAttackDelay(() => 0)).toBe(650);
+    expect(trainerAttackDelay(() => 0.5)).toBeGreaterThanOrEqual(775);
+    expect(trainerAttackDelay(() => 0.999)).toBeLessThanOrEqual(900);
+  });
+  it("gives trainer teams tougher Echoes and faster Ultimates", () => {
+    const battle = createTeamBattle(team, enemies);
+    expect(battle.enemy[0].hp).toBeGreaterThan(battle.player[0].hp);
+    expect(TRAINER_RULES.enemyBasicDamage).toBeGreaterThan(8);
+    expect(TRAINER_RULES.attacksBeforeUltimate).toBeLessThan(6);
   });
   it("preserves bench resources and locks switching until the replacement faints", () => {
     let s = createTeamBattle(team, enemies);
@@ -101,7 +131,7 @@ describe("faculty expansion", () => {
       for (const b of elements)
         expect([0.75, 1, 1.5]).toContain(typeMultiplier(a, b));
     expect(typeMultiplier("dark", "psychic")).toBe(1.5);
-    expect(typeMultiplier("fire", "dark")).toBe(1);
+    expect(typeMultiplier("fire", "dark")).toBe(1.5);
   });
   it("random orbs stay within reachable bounds", () => {
     for (let n = 0; n < 20; n++) {

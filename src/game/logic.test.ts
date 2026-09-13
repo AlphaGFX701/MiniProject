@@ -78,4 +78,12 @@ describe("save validation", () => {
     ]);
     expect(sanitized?.completedEncounterIds).toEqual(["building44"]);
   });
+
+  it("keeps a short, trimmed local player name", () => {
+    const sanitized = sanitizeSave({
+      ...INITIAL_SAVE(),
+      playerName: "  Echo Trainer  ",
+    });
+    expect(sanitized?.playerName).toBe("Echo Trainer");
+  });
 });

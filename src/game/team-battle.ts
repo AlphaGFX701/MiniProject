@@ -1,7 +1,16 @@
 import { BOSS_IDS, CREATURES } from "./data";
-import { damageFor, maxHpFor } from "./logic";
+import { damageFor, maxHpFor, typeMultiplier } from "./logic";
 import { chargedDamage, shieldDamage } from "./combat-rules";
 import type { CreatureId } from "./types";
+
+export const TRAINER_RULES = {
+  enemyHp: 145,
+  enemyBasicDamage: 10,
+  enemyUltimateDamage: 42,
+  attacksBeforeUltimate: 4,
+  enemyAttackMinMs: 650,
+  enemyAttackMaxMs: 900,
+} as const;
 
 export type Slot = {
   id: CreatureId;
@@ -38,12 +47,42 @@ export function validTeam(ids: CreatureId[], owned: CreatureId[]) {
 export function randomBossTeam(
   random: () => number = Math.random,
 ): CreatureId[] {
-  const pool = [...BOSS_IDS];
+  return shuffled(BOSS_IDS, random).slice(0, 3);
+}
+
+function shuffled<T>(items: readonly T[], random: () => number) {
+  const pool = [...items];
   for (let i = pool.length - 1; i > 0; i--) {
     const j = Math.min(i, Math.max(0, Math.floor(random() * (i + 1))));
     [pool[i], pool[j]] = [pool[j], pool[i]];
   }
-  return pool.slice(0, 3);
+  return pool;
+}
+
+export function bossTeamWithCounter(
+  openingCompanion: CreatureId,
+  random: () => number = Math.random,
+): CreatureId[] {
+  const defenderElement = CREATURES[openingCompanion].element;
+  const counters = BOSS_IDS.filter(
+    (id) => typeMultiplier(CREATURES[id].element, defenderElement) > 1,
+  );
+  const counter = shuffled(counters, random)[0];
+  const neutralPool = BOSS_IDS.filter(
+    (id) =>
+      id !== counter &&
+      typeMultiplier(CREATURES[id].element, defenderElement) <= 1,
+  );
+  return shuffled(
+    [counter, ...shuffled(neutralPool, random).slice(0, 2)],
+    random,
+  );
+}
+
+export function trainerAttackDelay(random: () => number = Math.random) {
+  const range =
+    TRAINER_RULES.enemyAttackMaxMs - TRAINER_RULES.enemyAttackMinMs;
+  return TRAINER_RULES.enemyAttackMinMs + Math.round(random() * range);
 }
 export function createTeamBattle(
   player: CreatureId[],
@@ -58,7 +97,7 @@ export function createTeamBattle(
     })),
     enemy: enemy.map((id) => ({
       id,
-      hp: maxHpFor(id, 120),
+      hp: maxHpFor(id, TRAINER_RULES.enemyHp),
       energy: 0,
       attacks: 0,
     })),
@@ -102,13 +141,16 @@ export function teamBattleReducer(
       break;
     case "enemy":
       if (s.phase !== "fight") return current;
-      if (e.attacks >= 6) {
+      if (e.attacks >= TRAINER_RULES.attacksBeforeUltimate) {
         e.attacks = 0;
         s.phase = "shield";
         break;
       }
       e.attacks++;
-      p.hp = Math.max(0, p.hp - damageFor(e.id, p.id, 8));
+      p.hp = Math.max(
+        0,
+        p.hp - damageFor(e.id, p.id, TRAINER_RULES.enemyBasicDamage),
+      );
       break;
     case "ultimate":
       if (s.phase !== "fight" || p.energy < 100) return current;
@@ -134,7 +176,7 @@ export function teamBattleReducer(
         0,
         p.hp -
           shieldDamage(
-            damageFor(e.id, p.id, 35),
+            damageFor(e.id, p.id, TRAINER_RULES.enemyUltimateDamage),
             event.shield && s.playerShield,
           ),
       );

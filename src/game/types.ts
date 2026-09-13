@@ -32,6 +32,9 @@ export type EncounterId =
   | "starter-grass";
 
 export type GameScreen =
+  | "title"
+  | "login"
+  | "name"
   | "onboarding"
   | "map"
   | "battle"
@@ -73,6 +76,7 @@ export type EncounterDefinition = {
 export type GameSaveV1 = {
   schemaVersion: 1 | 2;
   starterId?: CreatureId;
+  playerName?: string;
   facultyVictories?: LandmarkId[];
   ownedCreatureIds: CreatureId[];
   completedEncounterIds: EncounterId[];
@@ -84,6 +88,12 @@ export type GameSaveV1 = {
   qteHintSeen?: boolean;
   facultyNoticeSeen?: boolean;
 };
+
+export type SaveSlots = [
+  GameSaveV1 | null,
+  GameSaveV1 | null,
+  GameSaveV1 | null,
+];
 
 export type BattleState = {
   playerHp: number;

@@ -3,6 +3,8 @@ import type {
   CreatureId,
   EncounterDefinition,
   EncounterId,
+  LandmarkId,
+  Coordinate,
 } from "./types";
 
 export const CAMPUS_CENTER = {
@@ -11,6 +13,12 @@ export const CAMPUS_CENTER = {
 } as const;
 export const DEMO_SPEED_METERS_PER_SECOND = 4;
 export const WEAK_GPS_ACCURACY_METERS = 50;
+export const TRAINER_RADIUS_METERS = 40;
+export const FACULTY_COORDINATES: Record<LandmarkId, Coordinate> = {
+  faculty: { latitude: 13.82102, longitude: 100.51512 },
+  building44: { latitude: 13.81922, longitude: 100.51575 },
+  plaza: { latitude: 13.81935, longitude: 100.51442 },
+};
 export const STARTER_IDS: CreatureId[] = ["charmadillo", "gulfin", "cleaf"];
 
 export const CREATURES: Record<CreatureId, CreatureDefinition> = {

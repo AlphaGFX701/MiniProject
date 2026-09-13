@@ -1,4 +1,6 @@
+import { useEffect, useState } from "react";
 import {
+  Animated,
   Image,
   Pressable,
   StyleSheet,
@@ -11,12 +13,20 @@ import {
 } from "react-native";
 import type { ReactNode } from "react";
 
-import { elementColors, fonts, palette } from "../theme";
+import { elementColors, elementGlows, fonts, palette, shadows } from "../theme";
 import type { Element } from "../types";
 
 export function ElementBadge({ element }: { element: Element }) {
   return (
-    <View style={[styles.badge, { backgroundColor: elementColors[element] }]}>
+    <View
+      style={[
+        styles.badge,
+        {
+          backgroundColor: elementColors[element],
+          ...shadows.glow(elementGlows[element]),
+        },
+      ]}
+    >
       <Text style={styles.badgeText}>{element.toUpperCase()}</Text>
     </View>
   );
@@ -33,28 +43,64 @@ export function GameButton({
   variant?: "primary" | "secondary" | "danger" | "ghost";
   style?: StyleProp<ViewStyle>;
 }) {
+  const [scale] = useState(() => new Animated.Value(1));
+
+  const handlePressIn = () => {
+    Animated.spring(scale, {
+      toValue: 0.95,
+      useNativeDriver: true,
+      speed: 50,
+      bounciness: 0,
+    }).start();
+  };
+
+  const handlePressOut = () => {
+    Animated.spring(scale, {
+      toValue: 1,
+      useNativeDriver: true,
+      speed: 30,
+      bounciness: 8,
+    }).start();
+  };
+
+  const glowColor =
+    variant === "primary"
+      ? palette.glowYellow
+      : variant === "secondary"
+        ? palette.glowAqua
+        : variant === "danger"
+          ? palette.glowDanger
+          : "transparent";
+
   return (
-    <Pressable
-      accessibilityRole="button"
-      disabled={disabled}
-      {...props}
-      style={({ pressed }) => [
-        styles.button,
-        styles[`${variant}Button`],
-        disabled ? styles.disabled : null,
-        pressed && !disabled ? styles.pressed : null,
-        style,
-      ]}
-    >
-      <Text
-        style={[
-          styles.buttonText,
-          variant === "ghost" ? styles.ghostButtonText : null,
+    <Animated.View style={[{ transform: [{ scale }] }, style]}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ disabled: Boolean(disabled) }}
+        disabled={disabled}
+        onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
+        {...props}
+        style={() => [
+          styles.button,
+          styles[`${variant}Button`],
+          disabled ? styles.disabled : null,
+          !disabled && glowColor !== "transparent"
+            ? { shadowColor: glowColor, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.8, shadowRadius: 8, elevation: 6 }
+            : null,
         ]}
       >
-        {label}
-      </Text>
-    </Pressable>
+        <Text
+          style={[
+            styles.buttonText,
+            variant === "ghost" ? styles.ghostButtonText : null,
+            variant === "danger" ? styles.dangerButtonText : null,
+          ]}
+        >
+          {label}
+        </Text>
+      </Pressable>
+    </Animated.View>
   );
 }
 
@@ -70,6 +116,24 @@ export function ProgressBar({
   height?: number;
 }) {
   const percentage = Math.max(0, Math.min(100, (value / maximum) * 100));
+  const [shimmer] = useState(() => new Animated.Value(0));
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(shimmer, { toValue: 1, duration: 1200, useNativeDriver: true }),
+        Animated.timing(shimmer, { toValue: 0, duration: 1200, useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [shimmer]);
+
+  const shimmerOpacity = shimmer.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.0, 0.35],
+  });
+
   return (
     <View style={[styles.progressTrack, { height }]}>
       <View
@@ -77,7 +141,18 @@ export function ProgressBar({
           styles.progressFill,
           { width: `${percentage}%`, backgroundColor: color },
         ]}
-      />
+      >
+        <Animated.View
+          style={[
+            StyleSheet.absoluteFill,
+            {
+              backgroundColor: palette.white,
+              borderRadius: 999,
+              opacity: shimmerOpacity,
+            },
+          ]}
+        />
+      </View>
     </View>
   );
 }
@@ -101,15 +176,28 @@ export function IconButton({
   label: string;
   onPress: () => void;
 }) {
+  const [scale] = useState(() => new Animated.Value(1));
+
+  const handlePressIn = () => {
+    Animated.spring(scale, { toValue: 0.9, useNativeDriver: true, speed: 50, bounciness: 0 }).start();
+  };
+  const handlePressOut = () => {
+    Animated.spring(scale, { toValue: 1, useNativeDriver: true, speed: 30, bounciness: 10 }).start();
+  };
+
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      onPress={onPress}
-      style={styles.iconButton}
-    >
-      <Image source={source} style={styles.iconImage} resizeMode="contain" />
-    </Pressable>
+    <Animated.View style={{ transform: [{ scale }] }}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={label}
+        onPress={onPress}
+        onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
+        style={styles.iconButton}
+      >
+        <Image source={source} style={styles.iconImage} resizeMode="contain" />
+      </Pressable>
+    </Animated.View>
   );
 }
 
@@ -126,16 +214,17 @@ const styles = StyleSheet.create({
   button: {
     alignItems: "center",
     borderColor: palette.navy,
-    borderRadius: 14,
+    borderRadius: 16,
     borderWidth: 3,
     justifyContent: "center",
     minHeight: 52,
     paddingHorizontal: 18,
-    paddingVertical: 12,
+    paddingBottom: 10,
+    paddingTop: 12,
   },
-  primaryButton: { backgroundColor: palette.yellow },
-  secondaryButton: { backgroundColor: palette.aqua },
-  dangerButton: { backgroundColor: palette.danger },
+  primaryButton: { backgroundColor: palette.yellow, borderBottomWidth: 6 },
+  secondaryButton: { backgroundColor: palette.aqua, borderBottomWidth: 6 },
+  dangerButton: { backgroundColor: palette.danger, borderBottomWidth: 6 },
   ghostButton: { backgroundColor: palette.cream },
   buttonText: {
     color: palette.navy,
@@ -144,8 +233,8 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   ghostButtonText: { color: palette.navy },
+  dangerButtonText: { color: palette.white },
   disabled: { opacity: 0.45 },
-  pressed: { opacity: 0.8, transform: [{ translateY: 2 }] },
   progressTrack: {
     backgroundColor: "rgba(16,38,62,0.18)",
     borderColor: palette.navy,
@@ -153,18 +242,18 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     overflow: "hidden",
   },
-  progressFill: { height: "100%" },
+  progressFill: { height: "100%", overflow: "hidden" },
   panel: {
     backgroundColor: palette.cream,
     borderColor: palette.navy,
-    borderRadius: 20,
+    borderRadius: 22,
     borderWidth: 3,
-    padding: 16,
+    padding: 18,
     shadowColor: palette.navy,
-    shadowOffset: { width: 0, height: 5 },
-    shadowOpacity: 0.2,
-    shadowRadius: 0,
-    elevation: 5,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.28,
+    shadowRadius: 12,
+    elevation: 8,
   },
   iconButton: {
     alignItems: "center",
@@ -175,6 +264,11 @@ const styles = StyleSheet.create({
     height: 52,
     justifyContent: "center",
     width: 52,
+    shadowColor: palette.navy,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.30,
+    shadowRadius: 0,
+    elevation: 5,
   },
   iconImage: { height: 34, width: 34 },
 });

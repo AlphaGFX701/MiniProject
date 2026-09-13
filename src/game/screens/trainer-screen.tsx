@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  Animated,
   AppState,
   Image,
   ImageBackground,
@@ -14,45 +15,59 @@ import { useCombatAudio } from "../use-combat-audio";
 import { useGame } from "../game-context";
 import { CREATURES, PLAYER_IDS } from "../data";
 import { creatureArt, playerFrames } from "../assets";
+import { AnimatedFacultyPortrait } from "../components/animated-faculty-portrait";
 import { AnimatedCreature } from "../components/animated-creature";
 import { ChargeChallenge } from "../components/charge-challenge";
 import { ElementImpact } from "../components/element-impact";
 import { UltimateEffect } from "../components/ultimate-effect";
 import { GameButton, Panel, ProgressBar } from "../components/game-ui";
+import { PanningMountainBackground } from "../components/panning-mountain-background";
 import {
   createTeamBattle,
-  randomBossTeam,
+  bossTeamWithCounter,
   teamBattleReducer,
+  TRAINER_RULES,
+  trainerAttackDelay,
   validTeam,
   type BattleEvent,
   type TeamBattle,
 } from "../team-battle";
-import { maxHpFor } from "../logic";
+import { maxHpFor, typeMultiplier } from "../logic";
 import { elementColors, fonts, palette } from "../theme";
 import type { CreatureId, LandmarkId } from "../types";
 
 export const FACULTY: Record<
   LandmarkId,
-  { name: string; intro: string; closing: string; portrait: number }
+  { name: string; dialogue: string[]; closing: string; portrait: number }
 > = {
   faculty: {
-    name: "Dr. Soradech",
+    name: "Soradong",
     closing: "Good teamwork turns small steps into progress.",
-    intro:
+    dialogue: [
       "Welcome to Computer Education. Let us discover what your team can do together!",
+      "A great trainer watches carefully, then makes each move with purpose.",
+      "Your companions each bring a different strength. Trust them and learn from every turn.",
+    ],
     portrait: require("../../../assets/game/faculty/trainer-0.png"),
   },
   building44: {
-    name: "Dr. Vatinee",
+    name: "Veetina",
     closing: "Keep experimenting. Every challenge can teach you something.",
-    intro: "Every challenge is a chance to learn. Show me how you adapt!",
+    dialogue: [
+      "Every challenge is a chance to learn. Show me how you adapt!",
+      "Look closely at the elements in play. A small advantage can change the whole battle.",
+      "If a plan does not work at first, try a new companion and keep experimenting.",
+    ],
     portrait: require("../../../assets/game/faculty/trainer-1.png"),
   },
   plaza: {
-    name: "Panamet",
+    name: "Mr. Kingpin",
     closing: "Small companions, big courage. Keep exploring!",
-    intro:
+    dialogue: [
       "Small companions can achieve great things. Ready for a friendly challenge?",
+      "Courage is not about never feeling nervous. It is about standing beside your team anyway.",
+      "Explore, learn, and have fun. The strongest team is one that never stops growing.",
+    ],
     portrait: require("../../../assets/game/faculty/trainer-2.png"),
   },
 };
@@ -63,11 +78,15 @@ export function TrainerScreen() {
     trainer = FACULTY[id];
   const [step, setStep] = useState<"intro" | "select" | "battle">("intro");
   const [dialogPage, setDialogPage] = useState(0);
+  const [veetinaEasterEgg, setVeetinaEasterEgg] = useState(false);
+  const lastPortraitTap = useRef(0);
   const [feedback, setFeedback] = useState("");
   const feedbackTime = useRef(0);
   const resultTime = useRef(0);
   const pendingBattle = useRef<TeamBattle | null>(null);
   const [resultReady, setResultReady] = useState(false);
+  const [battleTransition, setBattleTransition] = useState(false);
+  const [battleFade] = useState(() => new Animated.Value(0));
   const [selected, setSelected] = useState<CreatureId[]>([]);
   const [battle, setBattle] = useState<TeamBattle | null>(null);
   const battleRef = useRef<TeamBattle | null>(null);
@@ -163,11 +182,20 @@ export function TrainerScreen() {
   }, []);
   useEffect(() => {
     if (!active || feedback || switching || battle?.phase !== "fight") return;
-    const timer = setInterval(
-      () => dispatchRef.current({ type: "enemy" }),
-      1200,
-    );
-    return () => clearInterval(timer);
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const scheduleAttack = () => {
+      timer = setTimeout(() => {
+        if (cancelled) return;
+        dispatchRef.current({ type: "enemy" });
+        scheduleAttack();
+      }, trainerAttackDelay());
+    };
+    scheduleAttack();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
   }, [
     active,
     switching,
@@ -219,15 +247,31 @@ export function TrainerScreen() {
     if (!validTeam(selected, save.ownedCreatureIds)) return;
     const next = createTeamBattle(
       selected,
-      battle ? battle.enemy.map((slot) => slot.id) : randomBossTeam(),
+      battle
+        ? battle.enemy.map((slot) => slot.id)
+        : bossTeamWithCounter(selected[0]),
     );
-    battleRef.current = next;
-    setBattle(next);
-    setStep("battle");
-    rewarded.current = false;
-    resultTime.current = 0;
-    setResultReady(false);
-    setVictoryMusic(false);
+    battleFade.setValue(0);
+    setBattleTransition(true);
+    Animated.timing(battleFade, {
+      toValue: 1,
+      duration: 240,
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (!finished) return;
+      battleRef.current = next;
+      setBattle(next);
+      setStep("battle");
+      rewarded.current = false;
+      resultTime.current = 0;
+      setResultReady(false);
+      setVictoryMusic(false);
+      Animated.timing(battleFade, {
+        toValue: 0,
+        duration: 320,
+        useNativeDriver: true,
+      }).start(() => setBattleTransition(false));
+    });
   };
   const choose = (creature: CreatureId) =>
     setSelected((current) =>
@@ -256,6 +300,31 @@ export function TrainerScreen() {
   };
   const player = battle?.player[battle.playerIndex],
     enemy = battle?.enemy[battle.enemyIndex];
+  const cutscenePages = [
+    ...trainer.dialogue,
+    "Choose three companions with different elements. Trainers use tougher Echoes and charge Ultimates quickly, so make every switch count.",
+  ];
+  const isLastCutscenePage = dialogPage === cutscenePages.length - 1;
+  const handleTrainerPortraitPress = () => {
+    if (id !== "building44" || step !== "intro") return;
+    const now = Date.now();
+    if (now - lastPortraitTap.current <= 350) {
+      setVeetinaEasterEgg((current) => !current);
+      lastPortraitTap.current = 0;
+      return;
+    }
+    lastPortraitTap.current = now;
+  };
+  const matchup =
+    player && enemy
+      ? typeMultiplier(CREATURES[player.id].element, CREATURES[enemy.id].element)
+      : 1;
+  const matchupLabel =
+    matchup > 1
+      ? "ELEMENT ADVANTAGE"
+      : matchup < 1
+        ? "ELEMENT DISADVANTAGE"
+        : "ELEMENT EVEN";
   return (
     <SafeAreaView style={s.root}>
       <View style={s.header}>
@@ -264,7 +333,7 @@ export function TrainerScreen() {
           onPress={returnToMap}
           style={s.back}
         >
-          <Text style={s.text}>‹ MAP</Text>
+          <Text style={s.backText}>‹ MAP</Text>
         </Pressable>
         <Text style={s.title}>{trainer.name.toUpperCase()}</Text>
       </View>
@@ -276,32 +345,49 @@ export function TrainerScreen() {
             style={s.introArena}
             imageStyle={{ resizeMode: "cover" }}
           >
-            <Image source={trainer.portrait} style={s.trainer} />
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={
+                id === "building44" ? "Veetina portrait" : undefined
+              }
+              disabled={id !== "building44"}
+              onPress={handleTrainerPortraitPress}
+              style={s.trainer}
+            >
+              <AnimatedFacultyPortrait
+                key={veetinaEasterEgg ? "easter-egg" : "standard"}
+                trainerId={id}
+                easterEgg={veetinaEasterEgg}
+                style={s.trainerImage}
+              />
+            </Pressable>
             <Image source={playerFrames.up[0]} style={s.avatar} />
-            <Text style={s.mystery}>? ? ?</Text>
           </ImageBackground>
           <Panel style={s.dialog}>
             <Text style={s.dialogTitle}>
               {trainer.name} would like to battle!
             </Text>
             <Text style={s.body}>
-              {dialogPage === 0
-                ? trainer.intro
-                : "Choose three companions with different elements. Your opponent will reveal their team during the battle."}
+              {cutscenePages[dialogPage]}
+            </Text>
+            <Text style={s.pageIndicator}>
+              {dialogPage + 1} / {cutscenePages.length}
             </Text>
             <Text style={s.note}>
               A fictional friendly challenge inspired by the CED faculty.
             </Text>
             <GameButton
-              label={dialogPage === 0 ? "NEXT" : "CHOOSE YOUR TEAM"}
+              label={isLastCutscenePage ? "CHOOSE YOUR TEAM" : "NEXT"}
               onPress={() =>
-                dialogPage === 0 ? setDialogPage(1) : setStep("select")
+                isLastCutscenePage
+                  ? setStep("select")
+                  : setDialogPage((page) => page + 1)
               }
             />
           </Panel>
         </>
       ) : step === "select" ? (
-        <>
+        <PanningMountainBackground scrimOpacity={0.76}>
           <Text style={s.eyebrow}>
             THREE COMPANIONS · THREE DIFFERENT ELEMENTS
           </Text>
@@ -382,7 +468,7 @@ export function TrainerScreen() {
               onPress={begin}
             />
           </View>
-        </>
+        </PanningMountainBackground>
       ) : battle && player && enemy ? (
         <>
           <View style={s.teamLine}>
@@ -407,10 +493,18 @@ export function TrainerScreen() {
             </Text>
             <ProgressBar
               value={enemy.hp}
-              maximum={maxHpFor(enemy.id, 120)}
+              maximum={maxHpFor(enemy.id, TRAINER_RULES.enemyHp)}
               color={elementColors[CREATURES[enemy.id].element]}
             />
             <Text style={s.text}>{enemy.hp} HP</Text>
+          </View>
+          <View
+            style={[
+              s.matchup,
+              matchup > 1 ? s.matchupStrong : matchup < 1 ? s.matchupWeak : null,
+            ]}
+          >
+            <Text style={s.matchupText}>{matchupLabel}</Text>
           </View>
           <ImageBackground
             source={require("../../../assets/game/backgrounds/faculty-backs.png")}
@@ -593,8 +687,8 @@ export function TrainerScreen() {
           {battle.phase === "won" || battle.phase === "lost" ? (
             <View style={s.overlay}>
               <Panel style={s.dialog}>
-                <Image
-                  source={trainer.portrait}
+                <AnimatedFacultyPortrait
+                  trainerId={id}
                   style={{ width: 100, height: 100, alignSelf: "center" }}
                 />
                 <Text style={s.dialogTitle}>
@@ -631,28 +725,77 @@ export function TrainerScreen() {
           ) : null}
         </>
       ) : null}
+      {battleTransition ? (
+        <Animated.View
+          pointerEvents="auto"
+          style={[s.battleFade, { opacity: battleFade }]}
+        />
+      ) : null}
     </SafeAreaView>
   );
 }
 const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#17152F" },
-  header: { flexDirection: "row", alignItems: "center", padding: 12, gap: 12 },
-  back: { minHeight: 48, justifyContent: "center", padding: 10 },
-  text: { color: palette.cream, fontSize: 12 },
-  title: {
-    color: palette.cream,
+  root: { flex: 1, backgroundColor: palette.navy },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 12,
+    backgroundColor: palette.navyLight,
+    borderBottomWidth: 2,
+    borderBottomColor: palette.navy,
+  },
+  back: {
+    minHeight: 38,
+    justifyContent: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: palette.navy,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: palette.aqua,
+  },
+  backText: {
+    color: palette.aqua,
     fontFamily: fonts.pixelBold,
-    fontSize: 13,
+    fontSize: 11,
+    letterSpacing: 0.5,
+  },
+  text: {
+    color: palette.cream,
+    fontFamily: fonts.pixel,
+    fontSize: 12,
+  },
+  title: {
+    color: palette.yellow,
+    fontFamily: fonts.pixelBold,
+    fontSize: 14,
     flex: 1,
+    letterSpacing: 0.5,
   },
   eyebrow: {
     color: palette.yellow,
+    fontFamily: fonts.pixelBold,
     textAlign: "center",
     fontSize: 11,
-    padding: 10,
+    paddingVertical: 10,
+    letterSpacing: 0.5,
   },
-  introArena: { height: 280, marginTop: 18 },
-  trainer: { position: "absolute", width: 160, height: 160, right: 20, top: 5 },
+  introArena: {
+    height: 280,
+    marginTop: 8,
+    borderBottomWidth: 3,
+    borderBottomColor: palette.navyLight,
+  },
+  trainer: {
+    position: "absolute",
+    width: 160,
+    height: 160,
+    right: 20,
+    top: 5,
+  },
+  trainerImage: { height: "100%", width: "100%" },
   avatar: {
     position: "absolute",
     width: 145,
@@ -660,61 +803,145 @@ const s = StyleSheet.create({
     left: 15,
     bottom: 0,
   },
-  mystery: {
-    position: "absolute",
-    right: 30,
-    bottom: 20,
-    color: "white",
-    fontSize: 24,
+  dialog: {
+    margin: 16,
+    gap: 12,
   },
-  dialog: { margin: 16, gap: 14 },
   dialogTitle: {
     fontFamily: fonts.pixelBold,
     color: palette.navy,
     fontSize: 15,
     lineHeight: 23,
   },
-  body: { color: palette.ink, fontSize: 15, lineHeight: 23 },
-  note: { color: "#B7ABCB", fontSize: 11, textAlign: "center", padding: 4 },
+  pageIndicator: {
+    alignSelf: "flex-end",
+    color: palette.aquaDark,
+    fontFamily: fonts.pixelBold,
+    fontSize: 8,
+  },
+  body: {
+    fontFamily: fonts.body,
+    color: palette.ink,
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  note: {
+    fontFamily: fonts.body,
+    color: palette.muted,
+    fontSize: 11,
+    textAlign: "center",
+    padding: 4,
+  },
   slots: {
     flexDirection: "row",
-    gap: 10,
+    gap: 12,
     justifyContent: "center",
     padding: 10,
   },
   slot: {
-    width: 82,
-    height: 84,
+    width: 86,
+    height: 88,
     borderWidth: 2,
-    borderColor: "#9E8DFC",
-    borderRadius: 12,
+    borderColor: palette.aquaDark,
+    borderRadius: 14,
     alignItems: "center",
+    justifyContent: "center",
     padding: 4,
+    backgroundColor: palette.navyLight,
   },
-  list: { padding: 14, gap: 10 },
+  list: {
+    padding: 14,
+    gap: 10,
+  },
   card: {
-    backgroundColor: "#43388B",
-    borderColor: "#9B8DEE",
+    backgroundColor: palette.navyLight,
+    borderColor: palette.navy,
     borderWidth: 2,
-    borderRadius: 18,
+    borderRadius: 16,
     padding: 14,
     flexDirection: "row",
     alignItems: "center",
-    minHeight: 94,
+    minHeight: 92,
   },
-  chosen: { backgroundColor: "#6651BA", borderColor: palette.yellow },
-  cardName: { color: "white", fontSize: 16, fontWeight: "bold" },
-  icon: { width: 66, height: 66 },
-  footer: { padding: 14, gap: 8, backgroundColor: "#211C3F" },
+  chosen: {
+    backgroundColor: "#1D3E5D",
+    borderColor: palette.yellow,
+    borderWidth: 2,
+  },
+  cardName: {
+    color: palette.white,
+    fontFamily: fonts.pixelBold,
+    fontSize: 14,
+  },
+  icon: {
+    width: 64,
+    height: 64,
+  },
+  footer: {
+    padding: 14,
+    gap: 10,
+    backgroundColor: palette.navyLight,
+    borderTopWidth: 2,
+    borderTopColor: palette.navy,
+  },
   teamLine: {
     flexDirection: "row",
     justifyContent: "space-between",
-    padding: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    backgroundColor: palette.navyLight,
+    borderBottomWidth: 1,
+    borderBottomColor: palette.navy,
   },
-  enemyStats: { padding: 12, gap: 6, alignSelf: "flex-end", width: "82%" },
-  arena: { flex: 1, minHeight: 240 },
-  enemy: { position: "absolute", right: 8, top: "24%", alignItems: "center" },
-  player: { position: "absolute", left: 0, bottom: 0, alignItems: "center" },
+  enemyStats: {
+    padding: 12,
+    gap: 6,
+    alignSelf: "flex-end",
+    width: "82%",
+    backgroundColor: "rgba(16, 38, 62, 0.85)",
+    borderTopLeftRadius: 16,
+    borderBottomLeftRadius: 16,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: palette.navyLight,
+  },
+  matchup: {
+    alignSelf: "center",
+    backgroundColor: palette.navyLight,
+    borderColor: palette.navy,
+    borderRadius: 999,
+    borderWidth: 2,
+    marginVertical: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  matchupStrong: {
+    backgroundColor: "#73D690",
+  },
+  matchupWeak: {
+    backgroundColor: "#FF899D",
+  },
+  matchupText: {
+    color: palette.navy,
+    fontFamily: fonts.pixelBold,
+    fontSize: 8,
+  },
+  arena: {
+    flex: 1,
+    minHeight: 240,
+  },
+  enemy: {
+    position: "absolute",
+    right: 8,
+    top: "24%",
+    alignItems: "center",
+  },
+  player: {
+    position: "absolute",
+    left: 0,
+    bottom: 0,
+    alignItems: "center",
+  },
   platform: {
     position: "absolute",
     bottom: -10,
@@ -726,15 +953,27 @@ const s = StyleSheet.create({
     borderWidth: 2,
     borderColor: "#8EBE6388",
   },
-  buttons: { flexDirection: "row", gap: 8 },
+  buttons: {
+    flexDirection: "row",
+    gap: 8,
+  },
   overlay: {
     position: "absolute",
     top: 0,
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: "#0A092BCC",
+    backgroundColor: palette.scrim,
     justifyContent: "center",
     zIndex: 30,
+  },
+  battleFade: {
+    backgroundColor: "#000000",
+    bottom: 0,
+    left: 0,
+    position: "absolute",
+    right: 0,
+    top: 0,
+    zIndex: 100,
   },
 });
